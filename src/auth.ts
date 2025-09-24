@@ -1,21 +1,21 @@
 import { randomBytes } from "crypto";
-import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import type { JwtPayload } from "jsonwebtoken";
 import { UserNotAuthenticatedError } from "./api/errors";
 
 export const ACCESS_TOKEN_ISSUER = "tubely-access";
 
-export function hashPassword(password: string) {
-  const saltRounds = 10;
-  return bcrypt.hash(password, saltRounds);
+export async function hashPassword(password: string) {
+  return await Bun.password.hash(password, {
+    algorithm: "argon2id",
+  });
 }
 
 export async function checkPasswordHash(password: string, hash: string) {
+  if (!password) return false;
   try {
-    const match = await bcrypt.compare(password, hash);
-    return match;
-  } catch (err) {
+    return await Bun.password.verify(password, hash);
+  } catch {
     return false;
   }
 }
