@@ -65,8 +65,8 @@ export async function handlerUploadThumbnail(cfg: ApiConfig, req: BunRequest) {
   const fileExtension = mediaType.split("/")[1];
   const imageData = await thumbnail.arrayBuffer();
 
-  if (mediaType != "image/png" || "image/jpeg") {
-    throw new BadRequestError("Not a Valid type");
+  if (mediaType !== "image/png" && mediaType !== "image/jpeg") {
+    throw new BadRequestError("Thumbnail must be a PNG or JPEG");
   }
 
   const video = await getVideo(cfg.db, videoId);
