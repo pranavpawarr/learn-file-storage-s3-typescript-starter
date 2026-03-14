@@ -5,6 +5,8 @@ import type { ApiConfig } from "../config";
 import type { BunRequest } from "bun";
 import { BadRequestError, NotFoundError, UserForbiddenError } from "./errors";
 import path from "path";
+import { randomBytes } from "crypto";
+import { getAssetDiskPath, getAssetPath, getAssetURL } from "./assets";
 
 type Thumbnail = {
   data: ArrayBuffer;
@@ -19,21 +21,17 @@ export async function handlerGetThumbnail(cfg: ApiConfig, req: BunRequest) {
     throw new BadRequestError("Invalid video ID");
   }
 
-  const video = getVideo(cfg.db, videoId);
-  if (!video) {
-    throw new NotFoundError("Couldn't find video");
-  }
-
-  const thumbnail = videoThumbnails.get(videoId);
-  if (!thumbnail) {
+  const video = await getVideo(cfg.db, videoId);
+  if (!video || !video.thumbnailURL) {
     throw new NotFoundError("Thumbnail not found");
   }
 
-  return new Response(thumbnail.data, {
-    headers: {
-      "Content-Type": thumbnail.mediaType,
-      "Cache-Control": "no-store",
-    },
+  const fileName = video.thumbnailURL.split("/assets/")[1];
+  const filePath = path.join(cfg.assetsRoot, fileName);
+  const file = Bun.file(filePath);
+
+  return new Response(file, {
+    headers: { "Cache-Control": "no-store" },
   });
 }
 
@@ -77,10 +75,15 @@ export async function handlerUploadThumbnail(cfg: ApiConfig, req: BunRequest) {
     throw new UserForbiddenError("You do not own this video");
   }
 
-  const filePath = path.join(cfg.assetsRoot, `${videoId}.${fileExtension}`);
+  const randomName = randomBytes(32).toString("base64url");
+  const filePath = path.join(cfg.assetsRoot, `${randomName}.${fileExtension}`);
   await Bun.write(filePath, imageData);
 
-  const thumbnailURL = `http://localhost:${cfg.port}/assets/${videoId}.${fileExtension}`;
+  const assetPath = getAssetPath(mediaType);
+  const assetDiskPath = getAssetDiskPath(cfg, assetPath);
+  await Bun.write(assetDiskPath, thumbnail);
+
+  const thumbnailURL = getAssetURL(cfg, assetPath);
   const updatedVideo = { ...video, thumbnailURL };
   await updateVideo(cfg.db, updatedVideo);
 
