@@ -91,3 +91,6 @@ async function serveStaticFile(relativePath: string, basePath: string) {
     return new Response("File not found", { status: 404 });
   }
 }
+
+console.log("AWS_REGION:", process.env.AWS_REGION);
+console.log("S3_REGION:", process.env.S3_REGION);

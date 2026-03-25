@@ -1,6 +1,5 @@
 import { newDatabase } from "./db/db";
 import type { Database } from "bun:sqlite";
-import { s3 } from "bun";
 import { S3Client } from "bun";
 
 export type ApiConfig = {
@@ -37,7 +36,13 @@ export const cfg: ApiConfig = {
   s3Bucket: s3Bucket,
   s3Region: s3Region,
   s3CfDistribution: s3CfDistribution,
-  s3Client: s3,
+  s3Client: new S3Client({
+    region: s3Region,
+    bucket: s3Bucket,
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    endpoint: `https://s3.${s3Region}.amazonaws.com`,
+  }),
   port: port,
 };
 

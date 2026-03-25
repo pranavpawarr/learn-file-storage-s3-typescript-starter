@@ -4,7 +4,7 @@ import { type ApiConfig } from "../config";
 import type { BunRequest } from "bun";
 import { BadRequestError, UserForbiddenError } from "./errors";
 import { getBearerToken, validateJWT } from "../auth";
-import { getVideo, updateVideo } from "../db/videos";
+import { getVideo, updateVideo, type Video } from "../db/videos";
 import { randomBytes } from "crypto";
 import { unlink } from "fs/promises";
 
@@ -44,7 +44,6 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
     throw new BadRequestError("Video must be an MP4");
   }
 
-  // Write to a temp file on disk
   const tempPath = path.join(
     "/tmp",
     `temp-${randomBytes(16).toString("hex")}.mp4`,
@@ -55,23 +54,26 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
   try {
     const aspectRatio = await getVideopAspectRatio(tempPath);
     const processedPath = await processVideoForFastStart(tempPath);
-    // Generate S3 key and upload
     const randomName = randomBytes(32).toString("hex");
     const s3Key = `${aspectRatio}/${randomName}.mp4`;
 
     const s3File = cfg.s3Client.file(s3Key, { bucket: cfg.s3Bucket });
-    await s3File.write(Bun.file(processedPath), { type: "video/mp4" });
+
+    try {
+      await s3File.write(Bun.file(processedPath), { type: "video/mp4" });
+    } catch (e: any) {
+      console.log("Full S3 error:", e.message, e);
+      throw e;
+    }
 
     await unlink(processedPath);
 
-    // Build S3 URL and update DB
-    const videoURL = `https://${cfg.s3Bucket}.s3.${cfg.s3Region}.amazonaws.com/${s3Key}`;
+    const videoURL = s3Key;
     const updatedVideo = { ...video, videoURL };
     await updateVideo(cfg.db, updatedVideo);
 
-    return respondWithJSON(200, updatedVideo);
+    return respondWithJSON(200, await dbVideoToSignedVideo(cfg, updatedVideo));
   } finally {
-    // Always clean up temp file
     await unlink(tempPath);
   }
 }
@@ -106,13 +108,12 @@ export async function getVideopAspectRatio(filePath: string): Promise<string> {
   const parsed = JSON.parse(stdoutText);
   const width = parsed.streams[0].width;
   const height = parsed.streams[0].height;
-
   const ratio = width / height;
 
   if (Math.floor(ratio * 100) === Math.floor((16 / 9) * 100)) {
     return "landscape";
   } else if (Math.floor(ratio * 100) === Math.floor((9 / 16) * 100)) {
-    return "portrait"; // 9:16
+    return "portrait";
   } else {
     return "other";
   }
@@ -152,4 +153,27 @@ export async function processVideoForFastStart(
   }
 
   return outputFilePath;
+}
+
+export async function generatePresignedURL(
+  cfg: ApiConfig,
+  key: string,
+  expireTime: number,
+): Promise<string> {
+  const url = cfg.s3Client.presign(key, {
+    bucket: cfg.s3Bucket,
+    expiresIn: expireTime,
+  });
+  return url;
+}
+
+export async function dbVideoToSignedVideo(
+  cfg: ApiConfig,
+  video: Video,
+): Promise<Video> {
+  if (!video.videoURL) {
+    return video;
+  }
+  const presignedURL = await generatePresignedURL(cfg, video.videoURL, 3600);
+  return { ...video, videoURL: presignedURL };
 }
